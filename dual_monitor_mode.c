@@ -39,6 +39,7 @@
 #include <linux/syscore_ops.h>
 #include <linux/cpu.h>
 #include <linux/suspend.h>
+#include <linux/version.h>
 
 #include <asm/apic.h>
 #include <asm/processor.h>
@@ -54,7 +55,9 @@
 MODULE_LICENSE("GPL");
 MODULE_SOFTDEP("pre: kvm-intel");
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
 extern struct kvm_x86_ops *kvm_x86_ops;
+#endif
 
 static DEFINE_PER_CPU(struct vmcs *, temp_vmcs);
 //static DEFINE_SPINLOCK(cntr_lock);
@@ -320,8 +323,11 @@ int protect_resources(void)
     MsrDesc.Hdr.ReturnStatus = 0;
     MsrDesc.Hdr.Reserved = 0;
     MsrDesc.Hdr.IgnoreResource = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
     MsrDesc.MsrIndex = MSR_IA32_FEATURE_CONTROL;
-    //MsrDesc.MsrIndex = MSR_IA32_FEAT_CTL;
+#else
+    MsrDesc.MsrIndex = MSR_IA32_FEAT_CTL;
+#endif
     MsrDesc.KernelModeProcessing = 0;
     MsrDesc.Reserved = 0;
     MsrDesc.ReadMask = (uint64_t) - 1;
@@ -911,6 +917,7 @@ static int stm_pm_notifier(struct notifier_block *nb, unsigned long mode, void *
 	switch(mode)
 	{
 		case PM_HIBERNATION_PREPARE:
+/*debug*/		printk("STM-LINUX: stm_pm_notifier: PM_HIBERNATION_PREPARE\n");
 			stm_shutdown( nb, mode, _unused);
 			smp_mb__before_atomic();
 			atomic_set(&is_stm, STM_SHUTDOWN_PM);
@@ -918,7 +925,29 @@ static int stm_pm_notifier(struct notifier_block *nb, unsigned long mode, void *
 			break;
 
 		case PM_POST_HIBERNATION:
+			printk("STM-LINUX: stm_pm_notifier: PM_POST_HIBERNATION\n");
 			stm_reboot( nb, mode, _unused);
+			break;
+
+		case PM_SUSPEND_PREPARE:
+			printk("STM-LINUX: stm_pm_notifier: PM_SUSPEND_PREPARE\n");
+			stm_shutdown( nb, mode, _unused);
+                        smp_mb__before_atomic();
+                        atomic_set(&is_stm, STM_SHUTDOWN_PM);
+                        smp_mb__after_atomic();
+			break;
+
+		case PM_POST_SUSPEND:
+			printk("STM-LINUX: stm_pm_notifier: PM_POST_SUSPEND\n");
+			stm_reboot(nb, mode, _unused);
+			break;
+
+		case PM_RESTORE_PREPARE:
+			printk("STM-LINUX: stm_pm_notifier: PM_RESTORE_PREPARE - no action\n");
+			break;
+
+		case PM_POST_RESTORE:
+			printk("STM-LINUX: stm_pm_notifier: PM_POST_RESTORE - no action\n");
 			break;
 
 		default:
@@ -1005,7 +1034,9 @@ static int boot_stm(void)
 		int count;
 		printk("%d STM-LINUX - reading nmi watchdog config\n", cpu);
 		position = 0;
-		count = kernel_read(nmi_watchdog_f, (char *)&nmi_watchdog_cfg, sizeof(nmi_watchdog_cfg), &position);
+		count = kernel_read(nmi_watchdog_f, (char *)&nmi_watchdog_cfg,
+					sizeof(nmi_watchdog_cfg), &position);
+
 		sscanf(nmi_watchdog_cfg, "%d", &nmi_watchdog_cfg_i);
 		
 		printk("%d STM-LINUX nmi_watchdog_cfg %d count:%d\n", cpu, nmi_watchdog_cfg_i, count);
@@ -1035,7 +1066,9 @@ static int boot_stm(void)
                 int count;
                 printk("%d STM-LINUX - reading threshold watchdog config\n", cpu);
                 position = 0;
-                count = kernel_read(threshold_watchdog_f, (char *)&nmi_watchdog_cfg, sizeof(nmi_watchdog_cfg), &position);
+                count = kernel_read(threshold_watchdog_f, (char *)&nmi_watchdog_cfg,
+					sizeof(nmi_watchdog_cfg), &position);
+
                 sscanf(nmi_watchdog_cfg, "%d", &nmi_watchdog_cfg_i);
 
                 printk("%d STM-LINUX threshold_watchdog_cfg %d count:%d\n", cpu, nmi_watchdog_cfg_i, count);
@@ -1047,7 +1080,9 @@ static int boot_stm(void)
                 }
                 position = 0;
 
-                kernel_read(threshold_watchdog_f, (char *)&nmi_watchdog_result, sizeof(nmi_watchdog_result), &position);
+		kernel_read(threshold_watchdog_f, (char *)&nmi_watchdog_result,
+					sizeof(nmi_watchdog_result), &position);
+
                 sscanf(nmi_watchdog_result, "%d", &nmi_watchdog_cfg_i);
                 printk("%d STM-LINUX threshold_watchdog_cfg - after %d err=%d\n", cpu, nmi_watchdog_cfg_i, err);
         }
@@ -1067,6 +1102,7 @@ static int stm_suspend(void)
 	struct notifier_block *notifier = NULL;
 	unsigned long val = 0;
 	void *v = NULL;
+	printk("STM-LINUX: stm_suspend\n");
 	
         stm_shutdown(notifier, val, v);
         return 0;
@@ -1077,6 +1113,8 @@ static void stm_resume(void)
 	// this is necessary because in the case of hibernate
 	// the cpus get shutdown before the STM can be suspended
 	// in that case - the STM gets shutdown at PM_HIBERNATE_PREPARE 
+
+	printk("STM-LINUX: stm_resume\n");
 
 	if(atomic_read(&is_stm) != STM_SHUTDOWN)
 		return;
