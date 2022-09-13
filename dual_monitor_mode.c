@@ -61,7 +61,6 @@ extern struct kvm_x86_ops *kvm_x86_ops;
 
 static DEFINE_PER_CPU(struct vmcs *, temp_vmcs);
 //static DEFINE_SPINLOCK(cntr_lock);
-//volatile bool stmbsp_done = false;
 static atomic_t stmbsp_done;
 
 static u32 vmcs_revision_id;
@@ -463,6 +462,9 @@ static void launch_stm(void *unused)
 
     cpu = smp_processor_id();
 
+        if(cpu != 0)
+		while(atomic_read(&bspready) == 0) {};
+
     printk("%d STM-LINUX - starting launch_stm\n", cpu);
 
     /* Consult MSR IA32_VMX_BASIC to find out if STM is supported.
@@ -583,8 +585,8 @@ static void launch_stm(void *unused)
             //return;
 	    goto done;
         }
-	// have to start the others first
 
+	// have to start the others first
 	smp_mb__before_atomic();
 	atomic_set(&bspready, 1); 
 	smp_mb__after_atomic();
@@ -594,7 +596,6 @@ static void launch_stm(void *unused)
                 ".byte 0x0f,0x01,0xc1\n"
                 :"=a"(eax_reg)
                 :"a"(STM_API_START));
-
         if ( eax_reg == STM_SUCCESS )
             printk("%d STM-LINUX: STM_API_START (BSP) succeeded\n", cpu);
         else
@@ -611,7 +612,7 @@ static void launch_stm(void *unused)
     }
     else
     {
-	while(atomic_read(&bspready) == 0) {};
+//	while(atomic_read(&bspready) == 0) {};
         asm volatile(
                 ".byte 0x0f,0x01,0xc1\n"
                 :"=a"(eax_reg)
@@ -664,10 +665,12 @@ void teardown_stm(void *unused)
 
     cpu = smp_processor_id();
 
+    printk("%d STM-LINUX: teardown_stm started\n", cpu);
+
     /* Teardown STM only if it has been previously enabled */
     if ( atomic_read(&is_stm) != 0x01 )
     {
-        printk("%d STM-LINUX: STM not enabled (%d)\n", cpu, atomic_read(&is_stm));
+        printk("%d STM-LINUX: teardown_stm - STM not enabled (%d)\n", cpu, atomic_read(&is_stm));
         goto done;
     }
 
@@ -679,10 +682,10 @@ void teardown_stm(void *unused)
                 :"a"(STM_API_STOP));
 
         if ( eax_reg == STM_SUCCESS )
-            printk("%d STM-LINUX: STM_API_STOP succeeded\n", cpu);
+            printk("%d STM-LINUX: teardown_stm STM_API_STOP succeeded\n", cpu);
         else
         {
-            printk("%d STM-LINUX: STM_API_STOP failed with error: 0x%lx\n", \
+            printk("%d STM-LINUX: teardown_stm STM_API_STOP failed with error: 0x%lx\n", \
                     cpu, (unsigned long)eax_reg);
             goto done;
         }
@@ -707,11 +710,11 @@ void teardown_stm(void *unused)
 done:
     if(cpu == 0)
     {
-        printk("%d STM-LINUX - waiting for APs to finish\n", cpu);
+        printk("%d STM-LINUX - (teardown) waiting for APs to finish\n", cpu);
         while ( atomic_read(&number_ap) < ((int)num_online_cpus() - 1) )
         {
         }
-        printk("%d STM-LINUX - APs finished,  BSP getting out\n", cpu);
+        printk("%d STM-LINUX - (teardown) APs finished,  BSP getting out\n", cpu);
 	smp_mb__before_atomic();
         atomic_set(&stmbsp_done, 1);
 	smp_mb__after_atomic();
@@ -876,7 +879,9 @@ void dump_stm_resource(STM_RSC *Resource)
 
 static int  stm_shutdown(struct notifier_block *notifier, unsigned long val, void *v)
 {
-	int cpu = smp_processor_id();;
+	int cpu = smp_processor_id();
+
+	printk("%d STM-LINUX: stm_shutdown entered\n", cpu);
 	
 	if(atomic_read(&is_stm) != 0x01)
 		return 0;
