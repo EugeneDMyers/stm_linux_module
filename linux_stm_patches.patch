@@ -1,0 +1,32 @@
+diff --git a/include/uapi/linux/kvm.h b/include/uapi/linux/kvm.h
+index ca41220..7d5e795 100644
+--- a/include/uapi/linux/kvm.h
++++ b/include/uapi/linux/kvm.h
+@@ -825,6 +825,10 @@ struct kvm_ppc_resize_hpt {
+ #define KVM_GET_API_VERSION       _IO(KVMIO,   0x00)
+ #define KVM_CREATE_VM             _IO(KVMIO,   0x01) /* returns a VM fd */
+ #define KVM_GET_MSR_INDEX_LIST    _IOWR(KVMIO, 0x02, struct kvm_msr_list)
++/* Bumps the KVM usage count for the STM */
++#define KVM_BUMP_USAGE_COUNT	  _IO(KVMIO,   0x20)
++/* Decrements the KVM usage count for STM breakdown */
++#define KVM_DEC_USAGE_COUNT	  _IO(KVMIO,   0x21)
+ 
+ #define KVM_S390_ENABLE_SIE       _IO(KVMIO,   0x06)
+ /*
+diff --git a/virt/kvm/kvm_main.c b/virt/kvm/kvm_main.c
+index 9cd8ca2..77b82a1 100644
+--- a/virt/kvm/kvm_main.c
++++ b/virt/kvm/kvm_main.c
+@@ -4058,6 +4058,12 @@ static long kvm_dev_ioctl(struct file *filp,
+ 	case KVM_CHECK_EXTENSION:
+ 		r = kvm_vm_ioctl_check_extension_generic(NULL, arg);
+ 		break;
++	case KVM_BUMP_USAGE_COUNT:
++		kvm_usage_count++;
++		break;
++	case KVM_DEC_USAGE_COUNT:
++		kvm_usage_count--;
++		break;
+ 	case KVM_GET_VCPU_MMAP_SIZE:
+ 		if (arg)
+ 			goto out;
